@@ -1,0 +1,663 @@
+---
+title: "The Slow March to Artistic Parity"
+subtitle: "Examining gender inequality in the Tate Collection"
+author: "Mark Russeff"
+date: "`r format(Sys.time(), '%B %d, %Y')`"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_sections: true
+---
+
+```{r}
+# Course: BUAN 5210
+# Title: The Slow March to Artistic Parity 
+# Purpose: Technical Appendix Final 
+# Date: March 14, 2019
+# Authors: Mark Russeff
+```
+
+```{r echo = FALSE, message=FALSE, warning=FALSE}
+
+# Clear environment of variables and functions
+rm(list = ls(all = TRUE)) 
+
+# Clear environmet of packages
+if(is.null(sessionInfo()$otherPkgs) == FALSE)lapply(paste("package:", names(sessionInfo()$otherPkgs), sep=""), detach, character.only = TRUE, unload = TRUE)
+```
+
+```{r message = FALSE, warning = FALSE}
+
+#Load Packages
+library(tidyverse)
+library(GGally)
+library(kableExtra)
+library(ggplot2)
+library(gridExtra)
+library(grid)
+library(gtable)
+library(scales)
+
+```
+
+#Load and Review Data
+```{r}
+
+#Artists data containing gender and other characteristics
+artists <- read.csv('Artists.csv')
+
+#Tate artwork data
+tate <- read.csv('tate_artworks.csv')
+
+#MOMA artwork data
+moma <- read.csv('moma_artworks.csv')
+
+#Check structure of the data
+str(artists)
+str(tate)
+
+```
+##Join the Data Sets
+```{r warning=FALSE}
+
+#Reorder artists names structure in Tate to joind with MOMA artist information
+splits <- str_split_fixed(tate$artist, ", ", 2)
+tate$artist <- paste(splits[,2], splits[,1], sep = ' ')
+
+#Join data sets
+tate <- inner_join(tate, artists, by = c("artist" = "DisplayName"))
+
+#Join MOMA data sets
+moma <- inner_join(moma, artists, by = c("Artist" = "DisplayName")) %>% 
+  mutate(Gender = Gender.y) %>%
+  filter(Gender %in% c("Male", "Female")) 
+
+```
+
+##Clean and Organize the Joined Data.
+```{r  warning=FALSE}
+
+#Select only variables of interest
+tate <- tate %>%
+  select(artist, title, dateText, medium, year, acquisitionYear, Nationality, Gender, BeginDate, EndDate) 
+
+#General data cleaning
+tate <- tate %>%
+  filter(Gender %in% c("Male", "Female")) %>%
+  droplevels() %>%
+  mutate(year = as.numeric(as.character(year))) %>%
+  drop_na(Nationality, acquisitionYear, year)
+
+#Create new variables of interest
+#Subject of the work based on title searching
+tate <- tate %>%
+  mutate(subject = if_else(grepl("Women |women |Woman |woman |Girl |girl |Queen |Princess |Mrs | she | hers ", title) == TRUE, "Woman", if_else(grepl(" Men | ^Men| men | Man | ^Man | man | Boy | ^Boy | boy | King | ^King | Prince | Mr |^Mr | he | his | him ", title) == TRUE, "Man", "Unknown"))) %>%
+  mutate(subject = as.factor(subject))
+
+#Create decade, artist age and age of art variables
+tate <- tate %>%
+  mutate(decade = acquisitionYear - (acquisitionYear %% 10)) %>%
+  mutate(age = if_else(BeginDate == 0, 0, 
+        if_else(EndDate == 0, 2019 - BeginDate, as.double(EndDate - BeginDate)))) %>%
+  mutate(artAge = if_else((acquisitionYear - year) > 0, acquisitionYear - year, 0)) 
+
+```
+# Univariate non-graphical
+
+##Categorical data - summary
+```{r}
+# Inspect descriptive statistics of data
+summary(tate)
+
+```
+
+**Observations on the data**
+
+- There are 10x more works by male artists in the Tate Collection than women.  
+- Twice as many pieces of art have women as the subject than men.
+- The Tate has been acquiring art for a very long time, since 1869.  
+- The data set we have only has acquisitions up until 2013.  
+- The median art age, time between the art being made and acquired is only 9 years.
+- The Tate Collection has more screenprints on paper than any other medium.  
+- Naturally most of the art is British but there is a very large portion that is American & German.
+
+##Categorical data - tabulation
+
+
+
+###Gender
+```{r}
+
+#Table of data by gender of artist
+tate %>% 
+  group_by(Gender) %>% 
+  summarise(count = n(),
+            median_year = median(year),
+            median_acqYear = median(acquisitionYear),
+            median_artAge = median(artAge)) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+
+```
+* The median year for art created by a male artists is older, this is because art is historically male dominated.  
+* The median acquisition year for female artists is 2002 while male artists is 1991, suggesting possible progress as the collection is acquiring more female artist's works in the 2000's.  
+* Womens art is being acquired sooner on average than men, at only 6 years after its made.
+
+###Gender and Subject Matter
+```{r}
+tate %>% 
+  group_by(Gender, subject) %>% 
+  summarise(count = n(),
+            median_year = median(year),
+            median_acqYear = median(acquisitionYear),
+            median_artAge = median(artAge)) %>%
+  arrange(desc(count)) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) 
+```
+
+* Women are the subject of art more than men.  
+* More Male artists are using Women as their subjects than Women.
+
+###Female Artists by Decade
+```{r}
+
+#Table of data for female artists by decade
+tate %>% 
+  filter(Gender == "Female") %>%
+  group_by(Gender, decade) %>% 
+  summarise(count = n(),
+            median_year = median(year),
+            median_acqYear = median(acquisitionYear),
+            median_artAge = median(artAge)) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+* The Tate Collections first acquisiton of a Female artists wasn't until the 1910's.  
+* The number of Female artist's works acquired has risen steadily since the 1950's.  
+* They are also acquiring more mature pieces, the median art age has risen steadily.
+
+###Female Artists by Medium
+
+```{r}
+tate %>% 
+  filter(Gender == "Female") %>%
+  group_by(Gender, medium) %>% 
+  summarise(count = n(),
+            median_year = median(year),
+            median_acqYear = median(acquisitionYear),
+            median_artAge = median(artAge)) %>%
+  arrange(desc(count)) %>%
+  head(n = 10) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) 
+```
+
+* Lithographs on paper by Female artists are popular.  
+* The Tate has been acquiring more photographs by Female artists, but they are primarily older works from the 1960's and 1970's.
+
+###Female Artists by Nationality
+```{r}
+tate %>% 
+  filter(Gender == "Female") %>%
+  group_by(Gender, Nationality) %>% 
+  summarise(count = n(),
+            median_year = median(year),
+            median_acqYear = median(acquisitionYear),
+            median_artAge = median(artAge)) %>%
+  arrange(desc(count)) %>%
+  head(n = 10) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+* The Tate Collection, which is British, has more Female American artists than British.
+* They have been building their collection of American Female artists recently.
+
+###Male Artists by Nationality
+```{r}
+tate %>% 
+  filter(Gender == "Male") %>%
+  group_by(Gender, Nationality) %>% 
+  summarise(count = n(),
+            median_year = median(year),
+            median_acqYear = median(acquisitionYear),
+            median_artAge = median(artAge)) %>%
+  arrange(desc(count)) %>%
+  head(n = 10) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive")) 
+```
+
+* There are twice as many pieces by Male British artists that American ones.  
+* Like the women, they are acquiring more Americans recently (higher median acquisition year)
+
+# Univariate graphical: categorical
+
+##Gender
+```{r}
+#Graph gender distributions for both Tate and MOMA
+tate_g1 <- grid.arrange(
+  #Graph the Tates collections by artists gender.
+  tate %>% 
+    group_by(Gender) %>% 
+    summarise(count = n(), sum = sum(n())) %>%
+    ggplot(aes(x = reorder(Gender, -count),
+             y = count)) + 
+    geom_bar(stat = "identity", fill = "#756bb1",
+             width = 0.8) +
+    theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+    annotate("text", x = 2, y = 5600, label = "9.7%", size = 14) +
+    annotate("text", x = 2, y = 7000, label = "TATE", size = 8) +
+    theme_classic() +
+    theme(axis.text = element_text(face = "bold", size = 10),
+        axis.text.y = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_blank(),
+        plot.title = element_text(size = 12, hjust = 0.12, vjust = -1),
+        legend.title = element_text(face = "bold")) ,
+  
+  #Graph MOMA's collection by artists gender for comparison
+  moma %>% 
+    group_by(Gender) %>% 
+    summarise(count = n()) %>%
+    ggplot(aes(x = reorder(Gender, -count),
+             y = count)) + 
+    geom_bar(stat = "identity", fill = "#bdbdbd",
+             width = 0.8) +
+    theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+    annotate("text", x = 2, y = 53000, label = "14.5%", size = 14) +
+    annotate("text", x = 2, y = 66000, label = "MOMA", size = 8) +
+    theme_classic() +
+    theme(axis.text = element_text(face = "bold", size = 10),
+        axis.text.y = element_blank(),
+        axis.title = element_blank(),
+        axis.ticks = element_blank(),
+        axis.line = element_blank(),
+        plot.title = element_text(size = 12, hjust = 0.12, vjust = -1),
+        legend.title = element_text(face = "bold")) ,
+
+ncol = 2,
+top = textGrob(
+    "Low Percentage of Female Artists",
+    gp = gpar(fontface = "bold", fontsize = 14))
+)
+
+tate_g1
+
+#Save graph
+ggsave("tate_g1.png", plot = tate_g1)
+```
+
+* The Tate appears to have a lower percentage of Female artists than MOMA.  
+* Is the Tate falling behind?  
+* MOMA does have a much larger collection with less older works of art.
+
+##Gender after 1990
+```{r}
+#Graph gender gap after 1990
+
+tate %>% 
+    filter(acquisitionYear > 1990) %>%
+    group_by(Gender) %>% 
+    summarise(count = n()) %>%
+    ggplot(aes(x = reorder(Gender, -count),
+             y = count)) + 
+    geom_bar(stat = "identity", fill = "#756bb1",
+             width = 0.8) +
+    theme(panel.grid.major = element_blank(),
+        panel.grid.minor = element_blank()) +
+    ggtitle("Art in the Tate collections by Gender",
+          subtitle = "Art acquired after 1990.") +
+    theme_classic() +
+    theme(axis.text = element_text(face = "bold", size = 10),
+        axis.title = element_blank(),
+        axis.ticks.x = element_blank(),
+        legend.title = element_text(face = "bold"))
+```
+
+* Gender gap looks slightly better after 1990 but there is still a large gap in acquisitions between Men & Women.
+
+##Gender and Subject Matter.
+```{r}
+
+#Graph subject matter based on keywords from titles.
+tate %>%
+  filter(subject != "Unknown") %>%
+  group_by(subject) %>%
+  summarise(count = n()) %>%
+  ggplot(aes(x = subject, y = count)) +
+  geom_bar(stat = "identity", fill = "#756bb1") +
+  theme(panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()) +
+  ggtitle("Art in the Tate collections",
+        subtitle = "Subjects of the Art - by Gender") +
+  theme_classic() +
+  theme(axis.text = element_text(face = "bold", size = 10),
+      axis.title = element_blank(),
+      axis.ticks.x = element_blank(),
+      legend.title = element_text(face = "bold"))
+```
+
+* Based on a small sample size.  
+* Women are the subject of art more than men.
+
+##Nationality
+```{r}
+
+grid.arrange(
+#Graph the Tates collection top Nationalities.
+ tate %>%
+  group_by(Nationality) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count)) %>%
+  head(n = 5) %>%
+  ggplot(aes(x = reorder(Nationality, count), y = count)) +
+  geom_bar(stat = "identity", fill = "#756bb1") +
+  theme(panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()) +
+  ggtitle("Art in the Tate collections",
+        subtitle = "Nationalities of the Artists") +
+  theme_classic() +
+  coord_flip() +
+  theme(axis.text = element_text(face = "bold", size = 10),
+      axis.title = element_blank(),
+      axis.ticks.x = element_blank(),
+      legend.title = element_text(face = "bold")) ,
+  
+tate %>%
+  filter(Gender == "Female") %>%
+  group_by(Nationality) %>%
+  summarise(count = n()) %>%
+  arrange(desc(count)) %>%
+  head(n = 5) %>%
+  ggplot(aes(x = reorder(Nationality, count), y = count)) +
+  geom_bar(stat = "identity", fill = "#bdbdbd") +
+  theme(panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()) +
+  ggtitle("Art in the Tate collections",
+        subtitle = "Nationalities of the Female Artists") +
+  theme_classic() +
+  coord_flip() +
+  theme(axis.text = element_text(face = "bold", size = 10),
+      axis.title = element_blank(),
+      axis.ticks.x = element_blank(),
+      legend.title = element_text(face = "bold")) ,
+
+ncol = 1
+)
+```
+
+* While the whole collection is predominately British artists, Female artists are predominately American.
+
+#Multi-variate graphical: quantitative
+## Correlations
+
+```{r, message = FALSE, error = FALSE}
+
+#Correlations
+ggpairs(subset(tate, select = -c(artist, title, dateText, medium, Nationality, decade, BeginDate, EndDate)))
+```
+
+* Not a whole lot of interest here, however we can see that the year an artwork is created is highly positively correlated to the acquisition year. This makes sense because of course art will be acquired after it has been made.
+
+#Multi-variate graphical: categorical and quantitative
+
+```{r}
+#Graph to look at gender distributions of acquisitions per year since 1980
+tate %>% 
+  filter(acquisitionYear > 1980) %>%
+  group_by(acquisitionYear, Gender) %>%
+  summarise(count = n()) %>%
+  ggplot(aes(x = acquisitionYear, y = count, fill = Gender)) +
+  geom_bar(stat = "identity") +
+  theme(panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()) +
+  ggtitle("Art in the Tate collections",
+        subtitle = "Art acquired after 1980.") +
+  theme_classic() +
+  scale_fill_manual(values = c("#756bb1","#bdbdbd")) +
+  theme(axis.text = element_text(face = "bold", size = 10),
+      axis.title = element_blank(),
+      axis.ticks.x = element_blank(),
+      legend.title = element_text(face = "bold"))
+```
+
+* There are some years were the distribution looks great (2002) but there are others where almost no art by female artists is acquired.  
+* There has never been a year where more works by Female artists were acquired.
+
+```{r}
+#Line graph examining the same relationship as above.
+tate_g3 <- tate %>% 
+  filter(acquisitionYear > 1960) %>%
+  group_by(acquisitionYear, Gender) %>%
+  summarise(count = n()) %>%
+  ggplot(aes(x = acquisitionYear, y = count, color = Gender)) +
+  geom_line(size = 1.5) +
+  theme(panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()) +
+  ggtitle("Art acquisitions by the Tate since 1960",
+        subtitle = "There has been huge spikes in acquisitions of Male artists but not for Female artists.") +
+  theme_classic() +
+  scale_colour_manual(values = c("#756bb1","#bdbdbd")) +
+  theme(axis.text = element_text(face = "bold", size = 10),
+      axis.title = element_blank(),
+      axis.ticks.x = element_blank(),
+      legend.title = element_text(face = "bold"),
+      plot.title = element_text(hjust=0.5, face ="bold"),
+      plot.subtitle = element_text(hjust = 0.5)) 
+
+tate_g3
+
+ggsave("tate_g3.png", plot = tate_g3)
+```
+
+* The gap between the genders is somewhat steady, with the exception of a few large spikes.  
+* Large spikes could be due to large endowments or donations by patrons.  
+* We can again observe that in 2002 the ratio was even.  
+* Female artist did see a little spike in association with the recent uptick in 2012, which was the London Olympic year.
+
+```{r}
+#Graph looking at the age of art when it is acquired by the Tate.
+tate %>% 
+  filter(decade > 1910) %>%
+  group_by(decade, Gender) %>%
+  summarise(meanAge = mean(artAge)) %>%
+  ggplot(aes(x = decade, y = meanAge, color = Gender)) +
+  geom_line(size =1.5) +
+  theme(panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()) +
+  ggtitle("Art Age when acquired by the Tate collections",
+        subtitle = "Art acquired after 1910.") +
+  theme_classic() +
+  scale_colour_manual(values = c("#756bb1","#bdbdbd")) +
+  theme(axis.text = element_text(face = "bold", size = 10),
+      axis.title = element_blank(),
+      axis.ticks.x = element_blank(),
+      legend.title = element_text(face = "bold"))
+```
+
+* We can see that art age trends do not vary too much by gender of the artist.  
+* Since the 1990's there has been a trend upward, so they have been acquiring more mature pieces.  
+
+```{r}
+#Graphing artist gender distribution since 1900.
+tate %>% 
+  filter(decade > 1900) %>%
+  group_by(decade, Gender) %>% 
+  summarise(subtotal = sum(n())) %>% 
+  group_by(decade) %>% 
+  mutate(gender_pct = subtotal / sum(subtotal)) %>%
+  
+  mutate(brand2 = factor(decade, levels = filter(., Gender == "Male") %>% .$decade)) %>% 
+  ggplot(aes(x = brand2, y = gender_pct, fill = Gender)) +
+    geom_bar(stat = "identity") + 
+    labs(fill = "Gender") +
+    coord_flip() +
+    guides(fill = guide_legend(reverse = TRUE)) +
+    theme_classic() +
+    scale_fill_manual(values = c("#756bb1","#bdbdbd")) +
+    theme(legend.position = "top", 
+          legend.justification = "center",
+          legend.title = element_text(face = "bold"),
+          axis.title.y = element_blank(),
+          axis.ticks.y = element_blank(),
+          axis.line.y = element_blank(),
+          axis.title.x = element_blank()) +
+    ggtitle("Gender Distribution")
+```
+  
+* Recent decades appear to be acquiring a higher percentage of art by women.  
+* The overal numbers are still very low, no decade has eclipsed 25% of acquisitions of women artists.  
+
+
+```{r}
+#Graphing the top 3 Nationalities in the Tate collection.
+tate_g4 <- tate %>% 
+  filter(Nationality == c("British", "American", "German")) %>%
+  group_by(Nationality, Gender) %>%
+  summarise(count = n()) %>% 
+  ggplot(aes(x = reorder(Nationality, count), y = count, fill = Gender)) +
+  geom_bar(stat = "identity") +
+  theme(panel.grid.major = element_blank(),
+      panel.grid.minor = element_blank()) +
+  ggtitle("Art acquired by top 3 Nationalities",
+        subtitle = "There are more female American artists in the Tate than female British artists") +
+  theme_classic() +
+  scale_fill_manual(values = c("#756bb1","#bdbdbd")) +
+  coord_flip() +
+  theme(axis.text = element_text(face = "bold", size = 10),
+      axis.title = element_blank(),
+      axis.ticks = element_blank(),
+      legend.title = element_text(face = "bold"),
+      plot.title = element_text(hjust=0.5, face ="bold"),
+        plot.subtitle = element_text(hjust = 0.5))
+
+tate_g4
+
+ggsave("tate_g4.png", plot = tate_g4)
+```
++ The Tate has a lot of Female American artists in their collection.  
++ In fact, they have more American women then they do British.  
++ For the men, there are roughly trwice as many British artists as American.  
++ The Tate is a very British focused institution in general.
+
+
+**Observations**
+
++ We can see that the Tate has a very low percentage of thier artists are women.  
++ The ratio is not getting better very quickly, progress is slow.  
++ When we look at the subjects gender, then women are higher (small sample)
++ So women are subjects in higher proportion to men but in dractically lower proportion as artists.
+
+#Research Question
+
+##Is the gender gap improving at the Tate?
+
+```{r}
+#Table of aquisitions by decade seperated by gender.
+tate %>% 
+  filter(decade > 1910) %>%
+  group_by(decade, Gender) %>% 
+  summarise(Count = n()) %>%
+  arrange(desc(decade)) %>%
+  kable() %>%
+  kable_styling(bootstrap_options = c("striped", "hover", "condensed", "responsive"))
+```
+
+**Null Hypothesis: Mean percentage of women artists is the same between every decade.**
+
+```{r}
+#Building a variable with mean percentage of women artists by decade to smooth out some of the volatility.
+tate_hyp <- tate %>%
+  group_by(decade, acquisitionYear, Gender) %>%
+  summarise(count = n()) %>%
+  transmute(Gender, percent = round(count/sum(count) * 100, 1)) %>%
+  filter(Gender == "Female")
+
+tate_hyp 
+
+#Looking at mean percentage of Female art aquired by the Tate by Decade and testing if they are statistically different.
+t.test(tate_hyp$percent[tate_hyp$decade == 2000], tate_hyp$percent[tate_hyp$decade == 2010])
+t.test(tate_hyp$percent[tate_hyp$decade == 1980], tate_hyp$percent[tate_hyp$decade == 2010])
+
+t.test(tate_hyp$percent[tate_hyp$decade == 1990], tate_hyp$percent[tate_hyp$decade == 2000])
+
+t.test(tate_hyp$percent[tate_hyp$decade == 1980], tate_hyp$percent[tate_hyp$decade == 1990])
+
+t.test(tate_hyp$percent[tate_hyp$decade == 1970], tate_hyp$percent[tate_hyp$decade == 1980])
+```
+
++ Incrementally, only the difference between 1990 and 2000 can reject the null hypothesis at the 5% significance level.  
++ However, we can also see that over longer intervals 1980 to 2010 we can also reject the null hypothesis of no difference at the 5% level.  
++ So there is statistical change it is just very slow.  
+
+```{r}
+#Graphing the relationship of the percentage of Female artists acquired by the decade.
+# 90% CI, get z-value for upper tail, use .95 since is one sided
+z <- qnorm(.95)
+
+# Incorporate CI into bar graph of mean percentages of Female artists acquired.
+tate_hyp %>%
+  filter(decade > 1920) %>%
+  group_by(decade, Gender) %>%
+  
+  summarise(m = mean(percent), sd = sd(percent), 
+            n = n(), ci = z * sd/sqrt(n)) %>%
+  ggplot(aes(x = decade, y = m)) +
+  geom_bar(stat = "identity", fill = "#756bb1") +
+  geom_errorbar(aes(ymin = m - ci, ymax = m + ci), 
+                width = 0.5, position = position_dodge(0.9)) +
+  theme_classic() +
+  xlab("") +
+  ylab("") +
+  theme(axis.ticks.x = element_blank(),
+          axis.title.x = element_blank(),
+          axis.ticks.y = element_blank()) +
+  ggtitle("Mean Percentage of Female Artists Acquired",
+          subtitle = "There is a lot of variance in the percentage over a decade")
+
+
+
+```
+
++ Graph with error bar, we can see the relationship we say in the t-tests.  
++ There are large error bars on some decades suggesting that we cannot determine if there was a true difference in the percentages or not.  
++ We can only observe most statistical differences in the long-term, mainly from the lows of the 1970's.  
+
+```{r}
+#Graphing the relationship above without error bars.
+tate_g2 <-tate_hyp %>%
+  group_by(decade, Gender) %>%
+  summarise(m = mean(percent), sd = sd(percent), 
+            n = n(), ci = z * sd/sqrt(n)) %>%
+  ggplot(aes(x = decade, y = m)) +
+  geom_bar(stat = "identity", fill = "#756bb1") +
+  geom_text(aes(label = percent(m/100)), vjust=1.5, color = "white", fontface = 2,
+           position = position_dodge(0.9), size = 3.5)+
+  theme_void() +
+  theme(axis.text.x = element_text(face = "bold", size = 11),
+        axis.title = element_blank(),
+        axis.ticks.x = element_blank(),
+        axis.line.x = element_blank(),
+        legend.position = "right",
+        legend.title = element_text(face = "bold"), 
+        plot.title = element_text(hjust=0.5, face ="bold"),
+        plot.subtitle = element_text(hjust = 0.5)) +
+  ggtitle("Average percentage of art by women acquired by decade.",
+          subtitle = "There has been progress since the 1970's but it has slowed")
+
+tate_g2
+
+ggsave("tate_g2.png", plot = tate_g2)
+```
+
+##Conclusion
+
+In addressing the main research question, we had to first determine that gender inequality does exist in the Tate collection. After gender inequality was identified we could examine the acquisition patterns of the Tate in order to determine if they were making progress; i.e. acquiring a higher ratio of female artists. Based on the detailed EDA and statistical analysis it is shown that some progress is being made in terms of the ratio of women artists being acquired by the Tate. However, there is not particularly strong statistical evidence for this progress. The numbers show only a meek improvement of the ratio on average over the decades.  It is easy to see a significant difference between the lows of the 1970’s and the 2010’s but progress is far more difficult to quantify in the 2000’s. The recommendation of this study is that the Tate should be pushed by patrons to acquire more art by female artists, particularly female British artists. The Tate claims to watch to “reflect the diversity of their community”, the first step will be closing the gender gap that currently exists. As a charitable organization, Tate members have a voice and they should use data driven activism within the ranks to spur progress.
